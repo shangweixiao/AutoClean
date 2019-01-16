@@ -4,22 +4,324 @@
 #include <tchar.h>  
 #include <windows.h>
 #include <stdio.h>
+#include <time.h>
 
-//定义全局函数变量  
+#define  SERVICE_DEBUG
+
+//定义全局函数变量 
+
+#ifndef SERVICE_DEBUG
 void Init();
 BOOL IsInstalled();
 BOOL Install();
 BOOL Uninstall();
-void LogEvent(LPCTSTR pszFormat, ...);
 void WINAPI ServiceMain();
 void WINAPI ServiceStrl(DWORD dwOpcode);
+#endif
 
-TCHAR szServiceName[] = _T("WatchDog");
+void LogEvent(LPCTSTR pszFormat, ...);
+
+TCHAR szServiceName[] = _T("AutoClean");
 BOOL bInstall;
 SERVICE_STATUS_HANDLE hServiceStatus;
 SERVICE_STATUS status;
 DWORD dwThreadID;
 
+typedef enum {
+	REPEATE_MODE_UNDEFINE = 0,
+	REPEATE_MODE_WEEKLY,
+	REPEATE_MODE_MONTHLY,
+	REPEATE_MODE_DAILY,
+}REPEATE_MODE_T;
+
+typedef struct {
+	REPEATE_MODE_T RepeatMode; // 重复周期
+	char RunningDay[4]; // 运行日期,按位记录，一天占用一位，一月最多31位。
+	char DelPath[MAX_PATH]; // 要删除的路径
+	__time64_t NextRunTime; // 下一次运行时间
+	__time64_t NotifiedTime; // 给用户的通知时间
+}RegData_t;
+
+DWORD GetRegData(RegData_t *RegData)
+{
+#define REG_VALUE_BUF_SIZE		64
+	LONG nRetVal = ERROR_SUCCESS;
+	HKEY hKey = NULL;
+	DWORD dwType;
+	CHAR pchRegValueBuf[REG_VALUE_BUF_SIZE];
+	DWORD dwBufSize = REG_VALUE_BUF_SIZE;
+
+	for (;;)
+	{
+		nRetVal = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\AutoClean", 0, KEY_READ, &hKey);
+		if (ERROR_SUCCESS != nRetVal)
+		{
+			hKey = NULL;
+			wprintf(L"RegOpenKeyEx Error Line: %d\n", __LINE__);
+			nRetVal = 1;
+			break;
+		}
+
+		ZeroMemory(pchRegValueBuf, REG_VALUE_BUF_SIZE);
+		dwBufSize = REG_VALUE_BUF_SIZE;
+		nRetVal = RegQueryValueExW(hKey, L"RepeatMode", NULL, &dwType, (BYTE *)pchRegValueBuf, &dwBufSize);
+		if (ERROR_SUCCESS != nRetVal)
+		{
+			wprintf(L"RegQueryValueEx Error Line: %d\n", __LINE__);
+			nRetVal = 2;
+		}
+		else
+		{
+			RegData->RepeatMode = *(REPEATE_MODE_T*)&pchRegValueBuf[0];
+			wprintf(L"RegQueryValueEx ReadSysDisk= %d\n", RegData->RepeatMode);
+		}
+
+		ZeroMemory(pchRegValueBuf, REG_VALUE_BUF_SIZE);
+		dwBufSize = REG_VALUE_BUF_SIZE;
+		nRetVal = RegQueryValueExW(hKey, L"RunningDay", NULL, &dwType, (BYTE *)pchRegValueBuf, &dwBufSize);
+		if (ERROR_SUCCESS != nRetVal)
+		{
+			wprintf(L"RegQueryValueEx Error Line: %d\n", __LINE__);
+			nRetVal = 2;
+		}
+		else
+		{
+			memcpy(RegData->RunningDay, pchRegValueBuf,sizeof(RegData->RunningDay));
+			wprintf(L"RegQueryValueEx ReadSysDisk= 0x%x,0x%x,0x%x,0x%x\n", RegData->RunningDay[3], RegData->RunningDay[2], RegData->RunningDay[1], RegData->RunningDay[0]);
+		}
+
+		ZeroMemory(pchRegValueBuf, REG_VALUE_BUF_SIZE);
+		dwBufSize = REG_VALUE_BUF_SIZE;
+		nRetVal = RegQueryValueEx(hKey, "DelPath", NULL, &dwType, (BYTE *)pchRegValueBuf, &dwBufSize);
+		if (ERROR_SUCCESS != nRetVal)
+		{
+			wprintf(L"RegQueryValueEx Error Line: %d\n", __LINE__);
+			nRetVal = 2;
+		}
+		else
+		{
+			memcpy(RegData->DelPath, pchRegValueBuf, dwBufSize);
+			wprintf(L"RegQueryValueEx ReadSysDisk= 0x%x,0x%x,0x%x,0x%x\n", RegData->RunningDay[3], RegData->RunningDay[2], RegData->RunningDay[1], RegData->RunningDay[0]);
+		}
+
+		ZeroMemory(pchRegValueBuf, REG_VALUE_BUF_SIZE);
+		dwBufSize = REG_VALUE_BUF_SIZE;
+		nRetVal = RegQueryValueExW(hKey, L"NextRunTime", NULL, &dwType, (BYTE *)pchRegValueBuf, &dwBufSize);
+		if (ERROR_SUCCESS != nRetVal)
+		{
+			wprintf(L"RegQueryValueEx Error Line: %d\n", __LINE__);
+			nRetVal = 2;
+		}
+		else
+		{
+			RegData->NextRunTime = *(__time64_t*)&pchRegValueBuf[0];
+			wprintf(L"RegQueryValueEx ReadSysDisk= %I64u\n", RegData->NextRunTime);
+		}
+
+		ZeroMemory(pchRegValueBuf, REG_VALUE_BUF_SIZE);
+		dwBufSize = REG_VALUE_BUF_SIZE;
+		nRetVal = RegQueryValueExW(hKey, L"NotifiedTime", NULL, &dwType, (BYTE *)pchRegValueBuf, &dwBufSize);
+		if (ERROR_SUCCESS != nRetVal)
+		{
+			wprintf(L"RegQueryValueEx Error Line: %d\n", __LINE__);
+			nRetVal = 2;
+		}
+		else
+		{
+			RegData->NotifiedTime = *(__time64_t*)&pchRegValueBuf[0];
+			wprintf(L"RegQueryValueEx ReadSysDisk= %I64u\n", RegData->NotifiedTime);
+		}
+		break;
+	}
+
+	if (NULL != hKey)
+	{
+		RegCloseKey(hKey);
+		hKey = NULL;
+	}
+
+	return nRetVal;
+}
+
+VOID NotifyUserToBackFiles(time_t DelTime)
+{
+
+}
+
+DWORD WaitUserToConfirm(char DelPath[MAX_PATH])
+{
+	return 0;
+}
+
+DWORD SetRegData(const char *key,char *val,int size)
+{
+#define REG_VALUE_BUF_SIZE		64
+	LONG nRetVal = ERROR_SUCCESS;
+	HKEY hKey = NULL;
+	DWORD dwType;
+	CHAR pchRegValueBuf[REG_VALUE_BUF_SIZE];
+	DWORD dwBufSize = REG_VALUE_BUF_SIZE;
+
+	for (;;)
+	{
+		nRetVal = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\AutoClean", 0, KEY_READ, &hKey);
+		if (ERROR_SUCCESS != nRetVal)
+		{
+			hKey = NULL;
+			wprintf(L"RegOpenKeyEx Error Line: %d\n", __LINE__);
+			nRetVal = 1;
+			break;
+		}
+
+		nRetVal = RegSetValueEx(hKey, key, 0, REG_BINARY, (BYTE*)val, size);
+		if (ERROR_SUCCESS != nRetVal)
+		{
+			hKey = NULL;
+			wprintf(L"RegSetValueEx Error Line: %d\n", __LINE__);
+			nRetVal = 1;
+			break;
+		}
+	}
+
+	if (NULL != hKey)
+	{
+		RegCloseKey(hKey);
+		hKey = NULL;
+	}
+
+	return nRetVal;
+}
+
+
+DWORD SetNextRunTime(time_t cur, RegData_t *rd)
+{
+	time_t NextRunTime;
+
+	if(REPEATE_MODE_DAILY == rd->RepeatMode)
+	{
+		NextRunTime = cur + 24 * 3600;
+	} 
+	else if(REPEATE_MODE_WEEKLY == rd->RepeatMode)
+	{
+		struct tm *local;
+		int i;
+		local = localtime(&cur);
+		NextRunTime = cur;
+		for(i=(local->tm_wday+1)%7; ; i = (i + 1) % 7) // tm_wday: [0 - 6]
+		{
+			NextRunTime += 24 * 3600;
+			if(rd->RunningDay[i/8] & (1UL << (i % 8)))
+			{
+				break;
+			}
+
+			if (i == local->tm_wday)
+			{
+				break;
+			}
+		}
+	}
+	else if (REPEATE_MODE_MONTHLY == rd->RepeatMode)
+	{
+		struct tm *local,*nrt;
+		int i;
+		local = localtime(&cur);
+		NextRunTime = cur;
+		for (i = local->tm_mday; ; i = (i + 1) % 31) // tm_mday: [1 - 31]
+		{
+			NextRunTime += 24 * 3600;
+			nrt = localtime(&NextRunTime);
+			if((nrt->tm_mday - 1) != i)
+			{
+				i = nrt->tm_mday - 1;
+			}
+
+			if (rd->RunningDay[i/8] & (1UL << (i % 8)))
+			{
+				break;
+			}
+
+			if (i == local->tm_mday)
+			{
+				break;
+			}
+		}
+	}
+	else
+	{
+		return 1;
+	}
+
+	SetRegData("NextRunTime",(char*)&NextRunTime,sizeof(NextRunTime));
+
+	return 0;
+}
+
+DWORD DeleteUserFiles(char DelPath[MAX_PATH])
+{
+	char cmd[MAX_PATH + 32] = { 0 };
+	sprintf(cmd,"rd /s /q \"%s\"", DelPath);
+	system(cmd);
+	return 0;
+}
+
+#ifndef SERVICE_DEBUG
+DWORD AutoCleanMain()
+#else
+int main(int argc,char **argv)
+#endif
+{
+	while (1)
+	{
+		RegData_t rd;
+		DWORD ret;
+
+		time_t cur;
+		struct tm *local, *NextRunTime;
+		double diff;
+		GetRegData(&rd);
+
+		cur = time(NULL);
+		local = localtime(&cur);
+		NextRunTime = localtime(&rd.NextRunTime);
+
+		if (REPEATE_MODE_UNDEFINE == rd.RepeatMode)
+		{
+			LogEvent(_T("重复周期设置错误。"));
+			break;
+		}
+
+		diff = difftime(rd.NextRunTime, cur);
+		if ((0 > diff) || ((local->tm_year == NextRunTime->tm_year) && (local->tm_mon == NextRunTime->tm_mon) && (local->tm_mday == NextRunTime->tm_mday)))
+		{
+			ret = WaitUserToConfirm(rd.DelPath);
+			if (0 == ret)
+			{
+				SetNextRunTime(cur, &rd);
+				DeleteUserFiles(rd.DelPath);
+				LogEvent(_T("删除目录:%s"), rd.DelPath);
+			}
+			else
+			{
+				SetNextRunTime(cur, &rd);
+				LogEvent(_T("用户取消了本次删除计划，已安排下一次运行时间。"));
+			}
+		}
+		else
+		{
+			if (3 * 24 * 3600 > diff && 0 < diff)
+			{
+				NotifyUserToBackFiles(rd.NextRunTime);
+				LogEvent(_T("删除时间小于3天，提示用户备份文件。"));
+			}
+		}
+		break;
+	}
+
+	return 0;
+}
+
+#ifndef SERVICE_DEBUG
 int APIENTRY _tWinMain(HINSTANCE hInstance,
 	HINSTANCE hPrevInstance,
 	LPTSTR    lpCmdLine,
@@ -88,19 +390,8 @@ void WINAPI ServiceMain()
 
 	//模拟服务的运行。应用时将主要任务放于此即可  
 	//可在此写上服务需要执行的代码，一般为死循环  
-	while (1)
-	{
-		FILE *p;
-		p = fopen("c:\\log.txt", "ab+");
-		SYSTEMTIME st;
-		GetSystemTime(&st);
-		char time[100] = { 0 };
-		_sntprintf(time, 100, "%4d-%02d-%02d %02d:%02d:%02d\r\n", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-		fwrite(time, strlen(time), 1, p);
-		fclose(p);
+	AutoCleanMain();
 
-		Sleep(1000);
-	}
 	status.dwCurrentState = SERVICE_STOPPED;
 	SetServiceStatus(hServiceStatus, &status);
 }
@@ -233,6 +524,7 @@ BOOL Uninstall()
 	LogEvent(_T("Service could not be deleted"));
 	return FALSE;
 }
+#endif
 
 //记录服务事件
 void LogEvent(LPCTSTR pFormat, ...)
