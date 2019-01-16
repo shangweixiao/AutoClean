@@ -173,7 +173,7 @@ DWORD SetRegData(const char *key,char *val,int size)
 			break;
 		}
 
-		nRetVal = RegSetValueEx(hKey, key, 0, REG_BINARY, (BYTE*)val, size);
+		nRetVal = RegSetValueEx(hKey, key, NULL, REG_BINARY, (BYTE*)val, size);
 		if (ERROR_SUCCESS != nRetVal)
 		{
 			hKey = NULL;
@@ -207,7 +207,7 @@ DWORD SetNextRunTime(time_t cur, RegData_t *rd)
 		int i;
 		local = localtime(&cur);
 		NextRunTime = cur;
-		for(i=(local->tm_wday+1)%7; ; i = (i + 1) % 7) // tm_wday: [0 - 6]
+		for(i = (local->tm_wday + 1)%7; ; i = (i + 1) % 7) // tm_wday: [0 - 6]
 		{
 			NextRunTime += 24 * 3600;
 			if(rd->RunningDay[i/8] & (1UL << (i % 8)))
@@ -277,13 +277,16 @@ int main(int argc,char **argv)
 		DWORD ret;
 
 		time_t cur;
-		struct tm *local, *NextRunTime;
+		struct tm local, NextRunTime,*plocal, *pNextRunTime;
 		double diff;
 		GetRegData(&rd);
 
 		cur = time(NULL);
-		local = localtime(&cur);
-		NextRunTime = localtime(&rd.NextRunTime);
+		plocal = localtime(&cur);
+		memcpy(&local,plocal,sizeof(struct tm));
+		
+		pNextRunTime = localtime(&rd.NextRunTime);
+		memcpy(&NextRunTime, pNextRunTime, sizeof(struct tm));
 
 		if (REPEATE_MODE_UNDEFINE == rd.RepeatMode)
 		{
@@ -292,7 +295,7 @@ int main(int argc,char **argv)
 		}
 
 		diff = difftime(rd.NextRunTime, cur);
-		if ((0 > diff) || ((local->tm_year == NextRunTime->tm_year) && (local->tm_mon == NextRunTime->tm_mon) && (local->tm_mday == NextRunTime->tm_mday)))
+		if ((0 > diff) || ((local.tm_year == NextRunTime.tm_year) && (local.tm_mon == NextRunTime.tm_mon) && (local.tm_mday == NextRunTime.tm_mday)))
 		{
 			ret = WaitUserToConfirm(rd.DelPath);
 			if (0 == ret)
