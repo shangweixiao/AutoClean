@@ -158,8 +158,6 @@ DWORD SetRegData(const char *key,char *val,int size)
 #define REG_VALUE_BUF_SIZE		64
 	LONG nRetVal = ERROR_SUCCESS;
 	HKEY hKey = NULL;
-	DWORD dwType;
-	CHAR pchRegValueBuf[REG_VALUE_BUF_SIZE];
 	DWORD dwBufSize = REG_VALUE_BUF_SIZE;
 
 	for (;;)
