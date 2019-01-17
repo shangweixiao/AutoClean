@@ -159,6 +159,11 @@ DWORD GetRegData(RegData_t *RegData)
 	return nRetVal;
 }
 
+#include <tlhelp32.h>
+#include <WtsApi32.h>
+#pragma comment(lib, "User32.lib")
+#pragma comment(lib, "Wtsapi32.lib")
+
 VOID NotifyUserToBackFiles(time_t DelTime,char CleanPath[MAX_PATH],int DaysBefore)
 {
 	char msg[MAX_PATH + 256] = { 0 };
@@ -184,8 +189,13 @@ VOID NotifyUserToBackFiles(time_t DelTime,char CleanPath[MAX_PATH],int DaysBefor
 		}
 	}
 
-	sprintf(msg, "系统将于 %d-%d-%d 清除 %s 路径下 %d-%d-%d 前的数据，如有重要数据请及时备份。", tmDelTime.tm_year + 1900, tmDelTime.tm_mon + 1, tmDelTime.tm_mday, CleanPath, tmFileTime.tm_year + 1900, tmFileTime.tm_mon + 1, tmFileTime.tm_mday);
-	MessageBox(NULL,msg,"警告",MB_OK);
+	int length = sprintf(msg, "系统将于 %d-%d-%d 清除 %s 路径下 %d-%d-%d 前的数据，如有重要数据请及时备份。", tmDelTime.tm_year + 1900, tmDelTime.tm_mon + 1, tmDelTime.tm_mday, CleanPath, tmFileTime.tm_year + 1900, tmFileTime.tm_mon + 1, tmFileTime.tm_mday);
+	
+	DWORD sessionId = WTSGetActiveConsoleSessionId();
+	DWORD     dwRespon = 0xff;
+	WTSSendMessageA((HANDLE)0, sessionId, (LPSTR)"警告", 6, msg, length, MB_OK, 0, &dwRespon, true);
+
+	//MessageBox(NULL,msg,"警告",MB_OK);
 }
 
 DWORD WaitUserToConfirm(time_t DelTime, char CleanPath[MAX_PATH], int DaysBefore)
@@ -213,8 +223,11 @@ DWORD WaitUserToConfirm(time_t DelTime, char CleanPath[MAX_PATH], int DaysBefore
 		}
 	}
 
-	sprintf(msg, "系统将开始清除 %s 路径下 %d-%d-%d 前的数据，点击确定开始清除操作，点击取消以取消本次清除计划。", CleanPath, tmFileTime.tm_year + 1900, tmFileTime.tm_mon + 1, tmFileTime.tm_mday);
-	if (IDOK == MessageBox(NULL, msg, "警告", MB_OKCANCEL))
+	int length = sprintf(msg, "系统将开始清除 %s 路径下 %d-%d-%d 前的数据，点击确定开始清除操作，点击取消以取消本次清除计划。", CleanPath, tmFileTime.tm_year + 1900, tmFileTime.tm_mon + 1, tmFileTime.tm_mday);
+	DWORD sessionId = WTSGetActiveConsoleSessionId();
+	DWORD     dwRespon = 0xff;
+	WTSSendMessageA((HANDLE)0, sessionId, (LPSTR)"警告", 6, msg, length, MB_OKCANCEL, 0, &dwRespon, true);
+	if (IDOK == dwRespon)
 	{
 		return 0;
 	}
@@ -234,7 +247,7 @@ DWORD SetRegData(const char *key,char *val,int size)
 
 	for (;;)
 	{
-		nRetVal = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\AutoClean", 0, KEY_READ, &hKey);
+		nRetVal = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\AutoClean", 0, KEY_WRITE, &hKey);
 		if (ERROR_SUCCESS != nRetVal)
 		{
 			hKey = NULL;
@@ -249,8 +262,8 @@ DWORD SetRegData(const char *key,char *val,int size)
 			hKey = NULL;
 			wprintf(L"RegSetValueEx Error Line: %d\n", __LINE__);
 			nRetVal = 1;
-			break;
 		}
+		break;
 	}
 
 	if (NULL != hKey)
@@ -269,7 +282,7 @@ DWORD SetNextRunTime(time_t cur, RegData_t *rd)
 
 	if(REPEATE_MODE_DAILY == rd->RepeatMode)
 	{
-		NextRunTime = cur + 24 * 3600;
+		NextRunTime = cur + (rd->RunningDay[0] + rd->RunningDay[1])*24 * 3600;
 	} 
 	else if(REPEATE_MODE_WEEKLY == rd->RepeatMode)
 	{
