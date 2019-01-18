@@ -531,7 +531,7 @@ int main(int argc, char **argv)
 	HANDLE hThread = NULL;
 	unsigned threadid = 0 ;
 
-	_beginthreadex(NULL, 0, AutoCleanThread, NULL, 0, &threadid);
+	_beginthreadex(NULL, 0, (_beginthreadex_proc_type)AutoCleanThread, NULL, 0, &threadid);
 
 	while (1)
 	{
