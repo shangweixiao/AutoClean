@@ -5,8 +5,9 @@
 #include <windows.h>
 #include <stdio.h>
 #include <time.h>
+#include <process.h>
 
-#define  SERVICE_DEBUG
+//#define  SERVICE_DEBUG
 
 //定义全局函数变量 
 
@@ -164,6 +165,20 @@ DWORD GetRegData(RegData_t *RegData)
 #pragma comment(lib, "User32.lib")
 #pragma comment(lib, "Wtsapi32.lib")
 
+DWORD SendMsessgeAndWaitForRespones(LPSTR pTitle, DWORD TitleLength, LPSTR pMessage, DWORD MessageLength, DWORD Style)
+{
+	DWORD sessionId = WTSGetActiveConsoleSessionId();
+	DWORD     dwRespon = 0xff;
+	WTSSendMessageA((HANDLE)0, sessionId, pTitle, TitleLength, pMessage, MessageLength, Style, 0, &dwRespon, true);
+
+	return dwRespon;
+}
+
+void DbgMessage(LPSTR pMessage, DWORD MessageLength)
+{
+	SendMsessgeAndWaitForRespones((LPSTR)"提示", (DWORD)strlen("提示"), pMessage, MessageLength, MB_OK);
+}
+
 VOID NotifyUserToBackFiles(time_t DelTime,char CleanPath[MAX_PATH],int DaysBefore)
 {
 	char msg[MAX_PATH + 256] = { 0 };
@@ -190,12 +205,7 @@ VOID NotifyUserToBackFiles(time_t DelTime,char CleanPath[MAX_PATH],int DaysBefor
 	}
 
 	int length = sprintf(msg, "系统将于 %d-%d-%d 清除 %s 路径下 %d-%d-%d 前的数据，如有重要数据请及时备份。", tmDelTime.tm_year + 1900, tmDelTime.tm_mon + 1, tmDelTime.tm_mday, CleanPath, tmFileTime.tm_year + 1900, tmFileTime.tm_mon + 1, tmFileTime.tm_mday);
-	
-	DWORD sessionId = WTSGetActiveConsoleSessionId();
-	DWORD     dwRespon = 0xff;
-	WTSSendMessageA((HANDLE)0, sessionId, (LPSTR)"警告", 6, msg, length, MB_OK, 0, &dwRespon, true);
-
-	//MessageBox(NULL,msg,"警告",MB_OK);
+	SendMsessgeAndWaitForRespones((LPSTR)"警告",(DWORD)strlen("警告"),msg,length,MB_OK);
 }
 
 DWORD WaitUserToConfirm(time_t DelTime, char CleanPath[MAX_PATH], int DaysBefore)
@@ -223,10 +233,8 @@ DWORD WaitUserToConfirm(time_t DelTime, char CleanPath[MAX_PATH], int DaysBefore
 		}
 	}
 
-	int length = sprintf(msg, "系统将开始清除 %s 路径下 %d-%d-%d 前的数据，点击确定开始清除操作，点击取消以取消本次清除计划。", CleanPath, tmFileTime.tm_year + 1900, tmFileTime.tm_mon + 1, tmFileTime.tm_mday);
-	DWORD sessionId = WTSGetActiveConsoleSessionId();
-	DWORD     dwRespon = 0xff;
-	WTSSendMessageA((HANDLE)0, sessionId, (LPSTR)"警告", 6, msg, length, MB_OKCANCEL, 0, &dwRespon, true);
+	int length = sprintf(msg, "系统将开始清除 %s 目录下 %d-%d-%d 前的数据，点击确定开始清除操作，点击取消以取消本次清除计划。", CleanPath, tmFileTime.tm_year + 1900, tmFileTime.tm_mon + 1, tmFileTime.tm_mday);
+	DWORD dwRespon = SendMsessgeAndWaitForRespones((LPSTR)"警告", (DWORD)strlen("警告"), msg, length, MB_OKCANCEL);
 	if (IDOK == dwRespon)
 	{
 		return 0;
@@ -235,7 +243,6 @@ DWORD WaitUserToConfirm(time_t DelTime, char CleanPath[MAX_PATH], int DaysBefore
 	{
 		return 1;
 	}
-
 }
 
 DWORD SetRegData(const char *key,char *val,int size)
@@ -427,9 +434,17 @@ DWORD DeleteFileCb(LPTSTR szPath, LPTSTR szFileName,DWORD DaysBefore)
 	
 	if (1 > DaysBefore )
 	{
-		if ((stCur.wYear - stLocal.wYear) * 12 + stCur.wMonth - stLocal.wMonth > 3)
+		DWORD DiffMon = (stCur.wYear - stLocal.wYear) * 12 + stCur.wMonth - stLocal.wMonth;
+		if (DiffMon  > 3)
 		{
 			DeleteFile(szFilePath);
+		}
+		else if (DiffMon == 3)
+		{
+			if (stCur.wDay > stLocal.wDay)
+			{
+				DeleteFile(szFilePath);
+			}
 		}
 	}
 	else
@@ -454,35 +469,29 @@ DWORD DeleteUserFiles(char CleanPath[MAX_PATH],DWORD DaysBefore)
 	return 0;
 }
 
-#ifndef SERVICE_DEBUG
-DWORD AutoCleanMain()
-#else
-int main(int argc,char **argv)
-#endif
+unsigned AutoCleanThread(void * param)
 {
-	while (1)
+	RegData_t rd;
+	DWORD ret;
+
+	time_t cur;
+	struct tm local, NextRunTime, *plocal, *pNextRunTime;
+	double diff;
+	GetRegData(&rd);
+
+	cur = time(NULL);
+	plocal = localtime(&cur);
+	memcpy(&local, plocal, sizeof(struct tm));
+
+	pNextRunTime = localtime(&rd.NextRunTime);
+	memcpy(&NextRunTime, pNextRunTime, sizeof(struct tm));
+
+	if (REPEATE_MODE_DAILY != rd.RepeatMode && REPEATE_MODE_WEEKLY != rd.RepeatMode && REPEATE_MODE_MONTHLY != rd.RepeatMode)
 	{
-		RegData_t rd;
-		DWORD ret;
-
-		time_t cur;
-		struct tm local, NextRunTime,*plocal, *pNextRunTime;
-		double diff;
-		GetRegData(&rd);
-
-		cur = time(NULL);
-		plocal = localtime(&cur);
-		memcpy(&local,plocal,sizeof(struct tm));
-		
-		pNextRunTime = localtime(&rd.NextRunTime);
-		memcpy(&NextRunTime, pNextRunTime, sizeof(struct tm));
-
-		if (REPEATE_MODE_UNDEFINE == rd.RepeatMode)
-		{
-			LogEvent(_T("重复周期设置错误。"));
-			break;
-		}
-
+		LogEvent(_T("重复周期设置错误。"));
+	}
+	else
+	{
 		diff = difftime(rd.NextRunTime, cur);
 		if ((0 > diff) || ((local.tm_year == NextRunTime.tm_year) && (local.tm_mon == NextRunTime.tm_mon) && (local.tm_mday == NextRunTime.tm_mday)))
 		{
@@ -490,7 +499,7 @@ int main(int argc,char **argv)
 			if (0 == ret)
 			{
 				SetNextRunTime(cur, &rd);
-				DeleteUserFiles(rd.CleanPath,rd.DaysBefore);
+				DeleteUserFiles(rd.CleanPath, rd.DaysBefore);
 				LogEvent(_T("删除目录:%s"), rd.CleanPath);
 			}
 			else
@@ -503,14 +512,31 @@ int main(int argc,char **argv)
 		{
 			if (3 * 24 * 3600 > diff && 0 < diff)
 			{
-				NotifyUserToBackFiles(rd.NextRunTime,rd.CleanPath,rd.DaysBefore);
+				NotifyUserToBackFiles(rd.NextRunTime, rd.CleanPath, rd.DaysBefore);
 				LogEvent(_T("临近删除日期，提示用户备份文件。"));
 			}
 		}
-		break;
 	}
 
+	_endthreadex(0);
 	return 0;
+}
+
+#ifndef SERVICE_DEBUG
+DWORD AutoCleanMain()
+#else
+int main(int argc, char **argv)
+#endif
+{
+	HANDLE hThread = NULL;
+	unsigned threadid = 0 ;
+
+	_beginthreadex(NULL, 0, AutoCleanThread, NULL, 0, &threadid);
+
+	while (1)
+	{
+		Sleep(1 * 1000);
+	}
 }
 
 #ifndef SERVICE_DEBUG
