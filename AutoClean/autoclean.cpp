@@ -38,7 +38,7 @@ typedef enum {
 typedef struct {
 	REPEATE_MODE_T RepeatMode; // 重复周期
 	char RunningDay[4]; // 运行日期,按位记录，一天占用一位，一月最多31位。
-	char CleanPath[MAX_PATH]; // 要删除的路径
+	char *CleanPath; // 要删除的路径
 	__time64_t NextRunTime; // 下一次运行时间
 	__time64_t NotifiedTime; // 给用户的通知时间
 	DWORD  DaysBefore;
@@ -75,7 +75,7 @@ DWORD GetRegData(RegData_t *RegData)
 		else
 		{
 			RegData->RepeatMode = *(REPEATE_MODE_T*)&pchRegValueBuf[0];
-			printf("RegQueryValueEx ReadSysDisk= %d\n", RegData->RepeatMode);
+			printf("RegQueryValueEx RepeatMode= %d\n", RegData->RepeatMode);
 		}
 
 		ZeroMemory(pchRegValueBuf, REG_VALUE_BUF_SIZE);
@@ -89,21 +89,26 @@ DWORD GetRegData(RegData_t *RegData)
 		else
 		{
 			memcpy(RegData->RunningDay, pchRegValueBuf,sizeof(RegData->RunningDay));
-			printf("RegQueryValueEx ReadSysDisk= 0x%x,0x%x,0x%x,0x%x\n", RegData->RunningDay[3], RegData->RunningDay[2], RegData->RunningDay[1], RegData->RunningDay[0]);
+			printf("RegQueryValueEx RunningDay= 0x%x,0x%x,0x%x,0x%x\n", RegData->RunningDay[3], RegData->RunningDay[2], RegData->RunningDay[1], RegData->RunningDay[0]);
 		}
 
-		ZeroMemory(pchRegValueBuf, REG_VALUE_BUF_SIZE);
-		dwBufSize = REG_VALUE_BUF_SIZE;
-		nRetVal = RegQueryValueEx(hKey, "CleanPath", NULL, &dwType, (BYTE *)pchRegValueBuf, &dwBufSize);
-		if (ERROR_SUCCESS != nRetVal)
+		dwBufSize = 0;
+		RegData->CleanPath = NULL;
+		nRetVal = RegQueryValueEx(hKey, "CleanPath", NULL, &dwType, NULL, &dwBufSize);
+		if (ERROR_SUCCESS == nRetVal)
 		{
-			printf("RegQueryValueEx Error Line: %d\n", __LINE__);
-			nRetVal = 2;
-		}
-		else
-		{
-			memcpy(RegData->CleanPath, pchRegValueBuf, dwBufSize);
-			printf("RegQueryValueEx ReadSysDisk= 0x%x,0x%x,0x%x,0x%x\n", RegData->RunningDay[3], RegData->RunningDay[2], RegData->RunningDay[1], RegData->RunningDay[0]);
+			dwBufSize += 2;
+			RegData->CleanPath = (char*)malloc(dwBufSize);
+			ZeroMemory(RegData->CleanPath, dwBufSize);
+
+			nRetVal = RegQueryValueEx(hKey, "CleanPath", NULL, &dwType, (BYTE *)RegData->CleanPath, &dwBufSize);
+			if (ERROR_SUCCESS != nRetVal)
+			{
+				printf("RegQueryValueEx Error Line: %d\n", __LINE__);
+				free(RegData->CleanPath);
+				RegData->CleanPath = NULL;
+				nRetVal = 2;
+			}
 		}
 
 		ZeroMemory(pchRegValueBuf, REG_VALUE_BUF_SIZE);
@@ -117,7 +122,7 @@ DWORD GetRegData(RegData_t *RegData)
 		else
 		{
 			RegData->NextRunTime = *(__time64_t*)&pchRegValueBuf[0];
-			printf("RegQueryValueEx ReadSysDisk= %I64u\n", RegData->NextRunTime);
+			printf("RegQueryValueEx NextRunTime= %I64u\n", RegData->NextRunTime);
 		}
 
 		ZeroMemory(pchRegValueBuf, REG_VALUE_BUF_SIZE);
@@ -127,11 +132,12 @@ DWORD GetRegData(RegData_t *RegData)
 		{
 			printf("RegQueryValueEx Error Line: %d\n", __LINE__);
 			nRetVal = 2;
+			RegData->NotifiedTime = 0;
 		}
 		else
 		{
 			RegData->NotifiedTime = *(__time64_t*)&pchRegValueBuf[0];
-			printf("RegQueryValueEx ReadSysDisk= %I64u\n", RegData->NotifiedTime);
+			printf("RegQueryValueEx NotifiedTime= %I64u\n", RegData->NotifiedTime);
 		}
 
 		ZeroMemory(pchRegValueBuf, REG_VALUE_BUF_SIZE);
@@ -179,9 +185,8 @@ void DbgMessage(LPSTR pMessage, DWORD MessageLength)
 	SendMsessgeAndWaitForRespones((LPSTR)"提示", (DWORD)strlen("提示"), pMessage, MessageLength, MB_OK);
 }
 
-VOID NotifyUserToBackFiles(time_t DelTime,char CleanPath[MAX_PATH],int DaysBefore)
+VOID NotifyUserToBackFiles(time_t DelTime,char *CleanPath,int DaysBefore)
 {
-	char msg[MAX_PATH + 256] = { 0 };
 	struct tm tmFileTime, tmDelTime;
 
 	memcpy(&tmDelTime, localtime(&DelTime),sizeof(struct tm));
@@ -204,13 +209,14 @@ VOID NotifyUserToBackFiles(time_t DelTime,char CleanPath[MAX_PATH],int DaysBefor
 		}
 	}
 
+	char *msg = (char*)calloc(1,strlen(CleanPath) + 256);
 	int length = sprintf(msg, "系统将于 %d-%d-%d 清除 %s 路径下 %d-%d-%d 前的数据，如有重要数据请及时备份。", tmDelTime.tm_year + 1900, tmDelTime.tm_mon + 1, tmDelTime.tm_mday, CleanPath, tmFileTime.tm_year + 1900, tmFileTime.tm_mon + 1, tmFileTime.tm_mday);
 	SendMsessgeAndWaitForRespones((LPSTR)"警告",(DWORD)strlen("警告"),msg,length,MB_OK);
+	free(msg);
 }
 
-DWORD WaitUserToConfirm(time_t DelTime, char CleanPath[MAX_PATH], int DaysBefore)
+DWORD WaitUserToConfirm(time_t DelTime, char *CleanPath, int DaysBefore)
 {
-	char msg[MAX_PATH + 256] = { 0 };
 	struct tm tmFileTime, tmDelTime;
 
 	memcpy(&tmDelTime, localtime(&DelTime), sizeof(struct tm));
@@ -233,8 +239,10 @@ DWORD WaitUserToConfirm(time_t DelTime, char CleanPath[MAX_PATH], int DaysBefore
 		}
 	}
 
+	char *msg = (char*)calloc(1,strlen(CleanPath) + 256);
 	int length = sprintf(msg, "系统将开始清除 %s 目录下 %d-%d-%d 前的数据，点击确定开始清除操作，点击取消以取消本次清除计划。", CleanPath, tmFileTime.tm_year + 1900, tmFileTime.tm_mon + 1, tmFileTime.tm_mday);
 	DWORD dwRespon = SendMsessgeAndWaitForRespones((LPSTR)"警告", (DWORD)strlen("警告"), msg, length, MB_OKCANCEL);
+	free(msg);
 	if (IDOK == dwRespon)
 	{
 		return 0;
@@ -462,10 +470,20 @@ DWORD DeleteFileCb(LPTSTR szPath, LPTSTR szFileName,DWORD DaysBefore)
 	return 0;
 }
 
-DWORD DeleteUserFiles(char CleanPath[MAX_PATH],DWORD DaysBefore)
+DWORD DeleteUserFiles(char *CleanPath,DWORD DaysBefore)
 {
+	char *pContext;
+	char *pPath = (char *)calloc(1,strlen(CleanPath) + 2);
+	strcpy(pPath,CleanPath);
 
-	EnumerateFileInDirectory(CleanPath,(LPTSTR)"*",TRUE, DeleteFileCb, DaysBefore);
+	char *pSubPath = strtok_s(pPath,";",&pContext);
+	while (NULL != pSubPath)
+	{
+		EnumerateFileInDirectory(pSubPath, (LPTSTR)"*", TRUE, DeleteFileCb, DaysBefore);
+		pSubPath = strtok_s(NULL, ";", &pContext);
+	}
+
+	free(pPath);
 	return 0;
 }
 
@@ -523,7 +541,7 @@ unsigned AutoCleanThread(void * param)
 			{
 				SetNextRunTime(cur, &rd);
 				DeleteUserFiles(rd.CleanPath, rd.DaysBefore);
-				LogEvent(_T("删除目录:%s"), rd.CleanPath);
+				LogEvent(_T("目录 %s 清理完成。删除了 %d%s 前的文件。"), rd.CleanPath, rd.DaysBefore > 0?rd.DaysBefore:3, rd.DaysBefore > 0?"天":"个月");
 			}
 			else
 			{
@@ -539,6 +557,11 @@ unsigned AutoCleanThread(void * param)
 				LogEvent(_T("临近删除日期，提示用户备份文件。"));
 			}
 		}
+	}
+
+	if (NULL != rd.CleanPath)
+	{
+		free(rd.CleanPath);
 	}
 
 	_endthreadex(0);
