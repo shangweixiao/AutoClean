@@ -477,6 +477,29 @@ unsigned AutoCleanThread(void * param)
 	time_t cur;
 	struct tm local, NextRunTime, *plocal, *pNextRunTime;
 	double diff;
+
+	// check user logon
+	while (1)
+	{
+		DWORD sessionId = WTSGetActiveConsoleSessionId();
+		LPSTR  pbuf;
+		DWORD length;
+		BOOL ret = WTSQuerySessionInformation(WTS_CURRENT_SERVER_HANDLE, sessionId, WTSConnectState,&pbuf,&length);
+		if (ret)
+		{
+			if (0 == *(DWORD*)pbuf)
+			{
+				WTSFreeMemory(pbuf);
+				break;
+			}
+			WTSFreeMemory(pbuf);
+		}
+
+		Sleep(3 * 1000);
+	}
+
+	Sleep(5 * 1000);
+
 	GetRegData(&rd);
 
 	cur = time(NULL);
