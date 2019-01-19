@@ -210,7 +210,7 @@ VOID NotifyUserToBackFiles(time_t DelTime,char *CleanPath,int DaysBefore)
 	}
 
 	char *msg = (char*)calloc(1,strlen(CleanPath) + 256);
-	int length = sprintf(msg, "系统将于 %d-%d-%d 日清除 %s 目录下 %d-%d-%d 日前的数据，如有重要数据请及时备份。", tmDelTime.tm_year + 1900, tmDelTime.tm_mon + 1, tmDelTime.tm_mday, CleanPath, tmFileTime.tm_year + 1900, tmFileTime.tm_mon + 1, tmFileTime.tm_mday);
+	int length = sprintf(msg, "系统将于 %d-%d-%d 清除 %s 目录下 %d-%d-%d 前的数据，如有重要数据请及时备份。", tmDelTime.tm_year + 1900, tmDelTime.tm_mon + 1, tmDelTime.tm_mday, CleanPath, tmFileTime.tm_year + 1900, tmFileTime.tm_mon + 1, tmFileTime.tm_mday);
 	SendMsessgeAndWaitForRespones((LPSTR)"警告",(DWORD)strlen("警告"),msg,length,MB_OK);
 	free(msg);
 }
@@ -240,7 +240,7 @@ DWORD WaitUserToConfirm(time_t DelTime, char *CleanPath, int DaysBefore)
 	}
 
 	char *msg = (char*)calloc(1,strlen(CleanPath) + 256);
-	int length = sprintf(msg, "系统将开始清除 %s 目录下 %d-%d-%d 日前的数据，点击确定开始清除操作，点击取消以取消本次清除计划。", CleanPath, tmFileTime.tm_year + 1900, tmFileTime.tm_mon + 1, tmFileTime.tm_mday);
+	int length = sprintf(msg, "系统将开始清除 %s 目录下 %d-%d-%d 前的数据，点击确定开始清除操作，点击取消以取消本次清除计划。", CleanPath, tmFileTime.tm_year + 1900, tmFileTime.tm_mon + 1, tmFileTime.tm_mday);
 	DWORD dwRespon = SendMsessgeAndWaitForRespones((LPSTR)"警告", (DWORD)strlen("警告"), msg, length, MB_OKCANCEL);
 	free(msg);
 	if (IDOK == dwRespon)
